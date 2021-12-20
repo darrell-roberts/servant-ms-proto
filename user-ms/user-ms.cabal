@@ -1,0 +1,86 @@
+cabal-version:      2.4
+name:               user-ms
+version:            0.1.0.0
+
+-- A short (one-line) description of the package.
+-- synopsis:
+
+-- A longer description of the package.
+-- description:
+
+-- A URL where users can report bugs.
+-- bug-reports:
+
+-- The license under which the package is released.
+-- license:
+author:             Darrell Roberts
+
+-- A copyright notice.
+-- copyright:
+-- category:
+extra-source-files: CHANGELOG.md
+
+library
+    exposed-modules: UserService.Client
+                     UserService.Types
+
+    other-modules:  UserService.Server
+                    UserService.Handlers
+                    UserService.Persistence
+    build-depends: base ^>=4.14.3.0
+                   , aeson
+                   , text
+                   , ms-framework
+                   , bson
+                   , mtl
+                   , mongoDB
+                   , unliftio
+                   , servant-server
+                   , servant-client
+                   , servant
+    hs-source-dirs:   app
+    default-language: Haskell2010
+    ghc-options: -Wall -Wunused-packages
+    default-extensions: ImportQualifiedPost
+                    UnicodeSyntax
+                    OverloadedStrings
+                    NamedFieldPuns
+                    LambdaCase
+                    DuplicateRecordFields
+                    FlexibleContexts
+                    RankNTypes
+
+
+executable user-ms
+    main-is:          Main.hs
+    other-modules: UserService.Types
+                   UserService.Server
+                   UserService.Handlers
+                   UserService.Persistence
+
+    build-depends:    base ^>=4.14.3.0
+                      , servant-server
+                      , aeson
+                      , text
+                      , wai
+                      , wai-extra
+                      , warp
+                      , mongoDB
+                      , optparse-applicative
+                      , mtl
+                      , fast-logger
+                      , bson
+                      , ms-framework
+                      , unliftio
+    hs-source-dirs:   app
+    default-language: Haskell2010
+    ghc-options: -Wall -Wunused-packages
+    default-extensions: ImportQualifiedPost
+                        UnicodeSyntax
+                        OverloadedStrings
+                        NamedFieldPuns
+                        LambdaCase
+                        DuplicateRecordFields
+                        FlexibleContexts
+                        RankNTypes
+
