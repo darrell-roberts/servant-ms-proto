@@ -5,8 +5,10 @@ module MSFramework.Logger
   , logInfo
   , logWarn
   , toJsonForLog
+  , toJsonSanitized
   ) where
 
+import Control.Concurrent         (myThreadId)
 import Control.Monad              (when)
 import Control.Monad.IO.Class     (MonadIO (..))
 import Control.Monad.Reader.Class (MonadReader (ask))
@@ -16,9 +18,10 @@ import Data.Text.Lazy             (toStrict)
 import Data.Text.Lazy.Encoding    (decodeUtf8)
 import Data.Time                  (getCurrentTime)
 import Data.UUID                  (UUID)
-import MSFramework.Data           (AppContext (..), LogLevel (..),
-                                   LogMessage (..), ProgramOptions (..))
-import MSFramework.Util           (millisSinceEpoch)
+import MSFramework.Types          (AppContext (..), LogLevel (..),
+                                   LogMessage (..), ProgramOptions (..),
+                                   ReqContext (..), Sanitize (sanitize))
+import MSFramework.Util           (millisSinceEpoch, showText)
 import System.Log.FastLogger      (LogStr, ToLogStr (toLogStr), pushLogStrLn)
 
 buildLogMessage ∷
@@ -30,6 +33,7 @@ buildLogMessage ∷
 buildLogMessage level appName requestId message = do
   timestamp <- liftIO getCurrentTime
   let epoch = millisSinceEpoch timestamp
+  threadId <- showText <$> myThreadId
   pure $ toLogStr $ LogMessage
     { message
     , timestamp
@@ -37,16 +41,16 @@ buildLogMessage level appName requestId message = do
     , requestId
     , appName
     , timeMillis = epoch
+    , threadId
     }
 
 logger ∷
   (MonadReader AppContext m, MonadIO m) ⇒
   LogLevel →
-  Maybe UUID →
   Text →
   m ()
-logger level requestId message = do
-  AppContext{logSet, errLogSet, options} <- ask
+logger level message = do
+  AppContext{logSet, errLogSet, options, reqContext = ReqContext{requestId}} <- ask
   let ProgramOptions{appName, logLevel} = options
   logMessage <- liftIO $ buildLogMessage level appName requestId message
   when (isLevelEnabled level logLevel) $
@@ -67,7 +71,6 @@ isLevelEnabled requestedLevel enabledLevel =
 
 logDebug, logInfo, logWarn, logError ::
   (MonadReader AppContext m, MonadIO m) ⇒
-  Maybe UUID →
   Text → m ()
 logDebug = logger Debug
 logInfo = logger Info
@@ -76,3 +79,6 @@ logError = logger Error
 
 toJsonForLog ∷ ToJSON a ⇒ a → Text
 toJsonForLog = toStrict . decodeUtf8 . encode
+
+toJsonSanitized ∷ (ToJSON a, Sanitize a) ⇒ a → Text
+toJsonSanitized = toJsonForLog . sanitize

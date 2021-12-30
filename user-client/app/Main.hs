@@ -1,15 +1,19 @@
-{-# LANGUAGE ExplicitNamespaces, ScopedTypeVariables #-}
+{-# LANGUAGE ExplicitNamespaces #-}
 
 module Main where
 
-import Data.Aeson          (Value)
-import Data.Text           (Text)
-import Network.HTTP.Client (defaultManagerSettings, newManager)
-import Servant.API         (NoContent, type (:<|>) ((:<|>)))
-import Servant.Client      (BaseUrl (BaseUrl), ClientM, Scheme (Http), client,
-                            mkClientEnv, runClientM)
-import UserService.Client  (searchUsers)
-import UserService.Types   (UpdateUser (..), User, UserSearch (UserSearch))
+import Data.Aeson               (Value)
+import Data.Text                (Text)
+import Network.Connection       (TLSSettings (..))
+import Network.HTTP.Client      (defaultManagerSettings, newManager)
+import Network.HTTP.Client.TLS  (mkManagerSettings)
+import Servant.API              (NoContent, type (:<|>) ((:<|>)))
+import Servant.Client.Streaming (BaseUrl (BaseUrl), ClientM,
+                                 Scheme (Http, Https), client, mkClientEnv,
+                                 withClientM)
+import UserService.Client       (searchUsers)
+import UserService.Types        (Email (..), UpdateUser (..), User,
+                                 UserSearch (UserSearch))
 
 {-
   https://docs.servant.dev/en/stable/tutorial/Client.html
@@ -23,12 +27,19 @@ import UserService.Types   (UpdateUser (..), User, UserSearch (UserSearch))
 
 queryUsers ∷ ClientM [User]
 queryUsers =
-  searchUsers $ UserSearch (Just "droberts@nowhere.com") Nothing Nothing
+  searchUsers $ UserSearch (Just $ Email "droberts@nowhere.com") Nothing Nothing
 
 main ∷ IO ()
 main = do
-  manager <- newManager defaultManagerSettings
-  res <- runClientM queryUsers (mkClientEnv manager $ BaseUrl Http "localhost" 8081 "")
-  case res of
-    Left err                -> putStrLn $ "Error " <> show err
-    Right (users :: [User]) -> print users
+  manager <- newManager tlsSelfSigned
+  withClientM queryUsers (mkClientEnv manager $ BaseUrl Https "localhost" 8443 "") $ \case
+    Left err    -> putStrLn $ "Error " <> show err
+    Right users -> print users
+  where
+    tlsSelfSigned = mkManagerSettings
+      TLSSettingsSimple
+      { settingDisableCertificateValidation = True
+      , settingDisableSession = True
+      , settingUseServerName = False
+      }
+      Nothing

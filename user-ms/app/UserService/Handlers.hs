@@ -5,76 +5,94 @@ module UserService.Handlers
   , searchUsers
   , totalUsers
   , updateUser
+  , downloadUsers
   ) where
-import Control.Exception       (Exception (displayException))
-import Data.Aeson              (Value, object, (.=))
-import Data.Bool               (bool)
-import Data.Text               (Text, pack)
-import MSFramework.Data        (AppM)
-import MSFramework.Logger      (toJsonForLog)
-import MSFramework.Servant     (ReqLogger (..), sendJSONError)
-import MSFramework.Util        (showText)
-import Servant                 (NoContent (..), err400, err404, throwError)
-import UserService.Persistence qualified as P
-import UserService.Types       (UpdateUser, User, UserSearch)
+
+import Conduit                    ((.|))
+import Control.Monad.Reader.Class (ask)
+import Data.Aeson                 (Value, encode, object, (.=))
+import Data.Bool                  (bool)
+import Data.ByteString            (ByteString)
+import Data.ByteString.Lazy       qualified as BSL
+import Data.Conduit.Combinators   qualified as C
+import Data.Conduit.Zlib          (gzip)
+import Data.Text                  (Text, pack)
+import MSFramework.Logger         (logDebug, logError, toJsonSanitized)
+import MSFramework.Servant        (sendJSONError)
+import MSFramework.Types          (AppM, Sanitize (sanitize))
+import MSFramework.Util           (showText)
+import Servant                    (NoContent (..), SourceIO, err400, err404,
+                                   throwError)
+import Servant.Conduit            (ConduitToSourceIO (conduitToSourceIO))
+import UnliftIO                   (Exception (displayException))
+import UserService.Persistence    qualified as P
+import UserService.Types          (UpdateUser, User, UserSearch)
 
 -- | Handler for the searchUsers endpoint.
-searchUsers ∷ ReqLogger → UserSearch → AppM [User]
-searchUsers rlog@ReqLogger{logDebug, logError} userSearch = do
-    logDebug $ "getting users with query: " <> showText userSearch
-    P.searchUsers rlog userSearch >>= \case
-      Left e -> do
-          logError $ "Failed to search users" <> pack (displayException e)
-          throwError err400
-      Right r -> pure $ bool r mempty (null r)
+searchUsers ∷ UserSearch → AppM [User]
+searchUsers userSearch = do
+  logDebug $ "getting users with query: " <> showText (sanitize userSearch)
+  P.searchUsers userSearch >>= \case
+    Left e -> do
+      logError $ "Failed to search users" <> pack (displayException e)
+      throwError err400
+    Right r -> pure $ bool r mempty (null r)
 
 -- | Handler for the SaveUser endoint.
-saveUser ∷ ReqLogger → User → AppM User
-saveUser rlog@ReqLogger{logDebug, logError} user = do
-    logDebug $ "Request to store user: " <> toJsonForLog user
-    P.insertUser rlog user >>= \case
-       Left e -> do
-           logError $ "Failed to save user: " <> pack (displayException e)
-           sendJSONError "Failed to save user"
-       Right u -> pure u
+saveUser ∷ User → AppM User
+saveUser user = do
+  logDebug $ "Request to store user: " <> toJsonSanitized user
+  P.insertUser user >>= \case
+    Left e -> do
+      logError $ "Failed to save user: " <> pack (displayException e)
+      sendJSONError "Failed to save user"
+    Right u -> pure u
 
 -- | Handler for the GetUser endpoint.
-getUser ∷ ReqLogger → Text → AppM User
-getUser rlog@ReqLogger{logDebug, logError} key = do
-    logDebug $ "Getting user with id " <> key
-    P.getUser rlog key >>= \case
-        Left e -> do
-            logError $ "Failed to get user: " <> pack (displayException e)
-            sendJSONError "Failed to get user"
-        Right u -> case u of
-            Just user -> pure user
-            Nothing   -> throwError err404
+getUser ∷ Text → AppM User
+getUser key = do
+  logDebug $ "Getting user with id " <> key
+  P.getUser key >>= \case
+    Left e -> do
+      logError $ "Failed to get user: " <> pack (displayException e)
+      sendJSONError "Failed to get user"
+    Right u -> case u of
+      Just user -> pure user
+      Nothing   -> throwError err404
 
 -- | Handler for the DelUser endpoint.
-delUser ∷ ReqLogger → Text → AppM NoContent
-delUser rlog@ReqLogger{logError} key = P.deleteUser rlog key >>= \case
-    Left e -> do
-        logError $ "Failed to delete user: " <> pack (displayException e)
-        sendJSONError "Failed to delete user"
-    Right _ -> pure NoContent
+delUser ∷ Text → AppM NoContent
+delUser key = P.deleteUser key >>= \case
+  Left e -> do
+    logError $ "Failed to delete user: " <> pack (displayException e)
+    sendJSONError "Failed to delete user"
+  Right _ -> pure NoContent
 
 -- | Handler for the ChangeUser endpoint.
-updateUser ∷ ReqLogger → UpdateUser → AppM NoContent
-updateUser rlog@ReqLogger{logError} user =
-    P.updateUser rlog user >>= \case
-        Left e -> do
-            logError $ "Failed to update user: " <> pack (displayException e)
-            sendJSONError "Failed to update user"
-        Right _ -> pure NoContent
+updateUser ∷ UpdateUser → AppM NoContent
+updateUser user =
+  P.updateUser user >>= \case
+    Left e -> do
+      logError $ "Failed to update user: " <> pack (displayException e)
+      sendJSONError "Failed to update user"
+    Right _ -> pure NoContent
 
 -- | Handler for the UserCount endpoint.
-totalUsers ∷ ReqLogger → AppM [Value]
-totalUsers rlog@ReqLogger{logError} =
-    P.totalUsers rlog >>= \case
-        Left e -> do
-            logError $ "Failed to get total user counts: " <> pack (displayException e)
-            sendJSONError "Failed to get counts"
-        Right r -> pure $ fmap toObject r
-    where
-        toObject ∷ (Text, Int) → Value
-        toObject (t, i) = object [t .= i]
+totalUsers ∷ AppM [Value]
+totalUsers =
+  P.totalUsers >>= \case
+    Left e -> do
+      logError $ "Failed to get total user counts: " <> pack (displayException e)
+      sendJSONError "Failed to get counts"
+    Right r -> pure $ fmap toObject r
+  where
+    toObject ∷ (Text, Int) → Value
+    toObject (t, i) = object [t .= i]
+
+-- | Streaming handler using conduit.
+downloadUsers ∷ AppM (SourceIO ByteString)
+downloadUsers = conduitToSourceIO . stream <$> ask
+  where
+    stream ctx = P.sourceAllUsers ctx
+            .| C.map (BSL.toStrict . encode)
+            .| gzip

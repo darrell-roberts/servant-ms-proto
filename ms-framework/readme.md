@@ -4,7 +4,7 @@ This project builds a microservices framework library.
 ## Modules
 |Name|Description|
 |----|-----------|
-|MSFramework.Data|Data types|
+|MSFramework.Types|Data types|
 |MSFramework.Servant|Custom servant combinators|
 |MSFramework.Middleware|Custom wai middleware|
 |MSFramework.MongoUtil|Mongo utility functions|

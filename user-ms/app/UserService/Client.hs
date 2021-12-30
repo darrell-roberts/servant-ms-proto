@@ -7,14 +7,16 @@ module UserService.Client
   , saveUser
   , searchUsers
   , userCount
+  , downloadUser
   ) where
 
-import Data.Aeson         (Value)
-import Data.Text          (Text)
-import Servant.API        (NoContent, type (:<|>) ((:<|>)))
-import Servant.Client     (ClientM, client)
-import UserService.Server (userApi)
-import UserService.Types  (UpdateUser, User, UserSearch)
+import Data.Aeson               (Value)
+import Data.ByteString          (ByteString)
+import Data.Text                (Text)
+import Servant.API              (NoContent, SourceIO, type (:<|>) ((:<|>)))
+import Servant.Client.Streaming qualified as S
+import UserService.Server       (userApi)
+import UserService.Types        (UpdateUser, User, UserSearch)
 
 {-
   https://docs.servant.dev/en/stable/tutorial/Client.html
@@ -26,13 +28,19 @@ import UserService.Types  (UpdateUser, User, UserSearch)
   would be validated at compile time.
 -}
 
-searchUsers ∷ UserSearch → ClientM [User]
-saveUser ∷ User → ClientM User
-getUser ∷ ClientM [Value]
-delUser ∷ Text → ClientM User
-changeUser ∷ Text → ClientM NoContent
-userCount ∷ UpdateUser → ClientM NoContent
+searchUsers ∷ UserSearch → S.ClientM [User]
+saveUser ∷ User → S.ClientM User
+getUser ∷ Text → S.ClientM User
+delUser ∷ Text → S.ClientM NoContent
+changeUser ∷ UpdateUser → S.ClientM NoContent
+userCount ∷ S.ClientM [Value]
+downloadUser ∷ S.ClientM (SourceIO ByteString)
 
-searchUsers :<|> saveUser :<|> getUser :<|> delUser :<|> changeUser :<|> userCount =
-  client userApi
+searchUsers
+  :<|> saveUser
+  :<|> userCount
+  :<|> downloadUser
+  :<|> getUser
+  :<|> delUser
+  :<|> changeUser = S.client userApi
 

@@ -35,6 +35,8 @@ executable user-client
                       , servant
                       , user-ms
                       , http-client
+                      , http-client-tls
+                      , connection
     hs-source-dirs:   app
     default-language: Haskell2010
     default-extensions: ImportQualifiedPost
