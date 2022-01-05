@@ -4,6 +4,7 @@ module MSFramework.Middleware
   , getRequestId
   , logInfo
   , logError
+  , logDebug
   , logStartMiddleware
   , requestIdKey
   , requestIdMiddleware
@@ -29,8 +30,9 @@ import Data.UUID             (UUID)
 import Data.UUID.V4          (nextRandom)
 import Data.Vault.Lazy       qualified as V
 import MSFramework.Logger    (buildLogMessage)
-import MSFramework.Types     (AppContext (..), LogLevel (Debug, Error, Info),
-                              ProgramOptions (..), ReqContext (ReqContext))
+import MSFramework.Types     (HasLogSettings (..), HasServerOptions (..),
+                              LogLevel (Debug, Error, Info), LogSettings (..),
+                              ReqContext (ReqContext), ServerOptions (..))
 import MSFramework.Util      (millisSinceEpoch, showText)
 import Network.HTTP.Types    (HeaderName, ResponseHeaders, Status (..),
                               status400)
@@ -47,16 +49,25 @@ import UnliftIO              (throwIO, tryAny)
 xRequestId ∷ HeaderName
 xRequestId = "X-Request-Id"
 
-logger ∷ LogLevel → AppContext → Maybe UUID → Text → IO ()
-logger level AppContext{logSet, options} uuid message = do
-  let ProgramOptions{appName} = options
+logger ∷
+  (HasLogSettings a, HasServerOptions a) ⇒
+  LogLevel →
+  a →
+  Maybe UUID →
+  Text →
+  IO ()
+logger level env uuid message = do
+  let ServerOptions{appName} = serverOptions env
+  let LogSettings{logSet} = logSettings env
   logStr <- buildLogMessage level appName uuid message
   pushLogStrLn logSet logStr
 
-logInfo ∷ AppContext → Maybe UUID → Text → IO ()
-logError ∷ AppContext → Maybe UUID → Text → IO ()
-logDebug ∷ AppContext → Maybe UUID → Text → IO ()
-
+logInfo, logError, logDebug ∷
+  (HasLogSettings a, HasServerOptions a) ⇒
+  a  →
+  Maybe UUID →
+  Text →
+  IO ()
 logInfo = logger Info
 logError = logger Error
 logDebug = logger Debug
@@ -74,7 +85,7 @@ requestIdKey = unsafePerformIO V.newKey
 getRequestId ∷ Request → Maybe UUID
 getRequestId req = V.lookup requestIdKey (vault req)
 
-logStartMiddleware ∷ AppContext → Middleware
+logStartMiddleware ∷ (HasLogSettings a, HasServerOptions a) ⇒ a → Middleware
 logStartMiddleware ctx application req responseFunc = do
   logDebug ctx (getRequestId req) "log start middleware"
   now <- millisSinceEpoch <$> getCurrentTime
@@ -96,7 +107,7 @@ getElapsedTime req startTime = case V.lookup startTimeKey (vault req) of
   Attempt to get a request id header and pass it through,
   otherwise create a new UUID and pass it through.
 -}
-requestIdMiddleware ∷ AppContext → Middleware
+requestIdMiddleware ∷ (HasLogSettings a, HasServerOptions a) ⇒ a → Middleware
 requestIdMiddleware ctx application req responseFunc = do
   requestId <- maybe nextRandom pure $ getRequestIdHeader req
   let v = V.insert requestIdKey requestId $ vault req
@@ -125,8 +136,8 @@ showReqUrl req =
   that does not have access to the `Request` `Vault`.
 -}
 data ApiCallException = ApiCallException
-  { requestId         :: Maybe UUID
-  , originalException :: SomeException
+  { requestId         :: !(Maybe UUID)
+  , originalException :: !SomeException
   }
   deriving (Show)
 
@@ -152,12 +163,12 @@ exceptionResponder e = responseLBS status400 headers (encode errorObj)
   by checking for errors and handling error logging and
   re-throwing `Exception`s.
 -}
-exceptionLogger ∷ AppContext → Middleware
+exceptionLogger ∷ (HasLogSettings a, HasServerOptions a) ⇒ a → Middleware
 exceptionLogger ctx application req resFunc = do
   logDebug ctx (getRequestId req) "exception logger middleware"
   result <- tryAny $ application req $ \res -> do
     -- Parsing errors in Servant won't raise an exception.
-    -- This is a hack to get those errors to log.
+    -- This is a way to get those errors to log.
     when (statusMessage (responseStatus res) /= "OK") $ do
       let errorMsg = fmap ((" Error message: " <>) . decodeUtf8 . snd) $
             find (\(name, _) -> name == "X-Error") $
@@ -177,6 +188,7 @@ exceptionLogger ctx application req resFunc = do
       logError ctx (getRequestId req) $
         "Error on Request: "
           <> showReqUrl req
+          <> " "
           <> pack (displayException e)
           <> " completed in "
           <> showText elapsedTime

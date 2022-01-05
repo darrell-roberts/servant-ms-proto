@@ -23,6 +23,7 @@ extra-source-files: CHANGELOG.md
 library
     exposed-modules: UserService.Client
                      UserService.Types
+                     UserService.Security
 
     other-modules:  UserService.Server
                     UserService.Handlers
@@ -45,19 +46,25 @@ library
                    , conduit-extra
                    , servant-conduit
                    , bytestring
-
+                   , servant-auth-client
+                   , servant-auth-server
+                   , servant-auth
+                   , jose
+                   , time
+                   , cryptonite
+                   , servant-flatten
     hs-source-dirs:   app
     default-language: Haskell2010
     ghc-options: -Wall -Wunused-packages
     default-extensions: ImportQualifiedPost
-                    UnicodeSyntax
-                    OverloadedStrings
-                    NamedFieldPuns
-                    LambdaCase
-                    DuplicateRecordFields
-                    FlexibleContexts
-                    RankNTypes
-
+                        UnicodeSyntax
+                        OverloadedStrings
+                        NamedFieldPuns
+                        LambdaCase
+                        DuplicateRecordFields
+                        FlexibleContexts
+                        RankNTypes
+                        TupleSections
 
 executable user-ms
     main-is:          Main.hs
@@ -65,6 +72,7 @@ executable user-ms
                    UserService.Server
                    UserService.Handlers
                    UserService.Persistence
+                   UserService.Security
 
     build-depends:    base ^>=4.14.3.0
                       , servant-server
@@ -83,14 +91,19 @@ executable user-ms
                       , unliftio
                       , validation-selective
                       , regex-tdfa
-                      , time
                       , unix
                       , bytestring
                       , conduit
                       , conduit-extra
                       , servant-conduit
-                      , network
-
+                      , tls
+                      , x509-store
+                      , data-default-class
+                      , servant-auth-server
+                      , servant-auth
+                      , jose
+                      , time
+                      , cryptonite
     hs-source-dirs:   app
     default-language: Haskell2010
     ghc-options: -Wall -Wunused-packages -threaded
@@ -102,4 +115,5 @@ executable user-ms
                         DuplicateRecordFields
                         FlexibleContexts
                         RankNTypes
+                        TupleSections
 

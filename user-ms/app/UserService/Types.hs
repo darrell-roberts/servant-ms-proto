@@ -1,17 +1,24 @@
-{-# LANGUAGE DeriveAnyClass, DeriveGeneric, ScopedTypeVariables,
-             TypeFamilies #-}
+{-# LANGUAGE DataKinds, DeriveAnyClass, DeriveGeneric, FlexibleInstances,
+             ScopedTypeVariables, TypeFamilies #-}
 
 module UserService.Types (
-    Email (..)
+    AppM
+  , Email (..)
   , Gender (..)
   , LogLevel (..)
   , UpdateUser (..)
   , User (..)
   , UserSearch (..)
+  , UserMsAppContext (..)
+  , UserAppOptions (..)
+  , UserClaims (..)
+  , Role (..)
   , fromBson
   , toBson
   ) where
 
+import Control.Monad         (guard)
+import Control.Monad.Reader  (ReaderT)
 import Data.Aeson            (FromJSON (..), ToJSON (..), object, withObject,
                               (.:), (.:?), (.=))
 import Data.Bson             (Document, ObjectId, Val, Value (..), cast',
@@ -19,13 +26,50 @@ import Data.Bson             (Document, ObjectId, Val, Value (..), cast',
 import Data.List.NonEmpty    (NonEmpty, toList)
 import Data.Text             (Text)
 import GHC.Generics          (Generic)
-import MSFramework.Types     (LogLevel (..), Sanitize, sanitize)
+import MSFramework.Types     (ConnectionPool, HasLogSettings (..),
+                              HasMongoConnectionPool (..), HasMongoOptions (..),
+                              HasRequestContext (..), HasServerOptions (..),
+                              LogLevel (..), LogSettings, MongoOptions,
+                              ReqContext, Sanitize, ServerOptions, sanitize)
 import MSFramework.Util      (maskShowFirstLast, showText)
 import MSFramework.Validator (Validator (..))
 import Prelude               hiding (id, lookup)
+import Servant               (Handler)
+import Servant.Auth.Server   (FromJWT, ToJWT)
 import Text.Read             (readMaybe)
 import Text.Regex.TDFA       ((=~))
 import Validation            (Validation (..), failureIf, failureUnless)
+
+type AppM = ReaderT UserMsAppContext Handler
+
+-- | Application context.
+data UserMsAppContext = UserMsAppContext
+  { _mongoPool   :: !ConnectionPool
+  , options      :: !UserAppOptions
+  , _logSettings :: !LogSettings
+  , reqContext   :: !ReqContext
+  }
+
+-- | Program options parsed by optparse-applicative.
+data UserAppOptions = UserAppOptions
+  { _serverOptions :: !ServerOptions
+  , _mongoOptions  :: !MongoOptions
+  }
+
+instance HasMongoConnectionPool UserMsAppContext where
+  mongoPool = _mongoPool
+
+instance HasMongoOptions UserMsAppContext where
+  mongoOptions = _mongoOptions . options
+
+instance HasLogSettings UserMsAppContext where
+  logSettings = _logSettings
+
+instance HasRequestContext UserMsAppContext where
+  requestContext = reqContext
+
+instance HasServerOptions UserMsAppContext where
+  serverOptions = _serverOptions . options
 
 -- | Field name for record field validation errors.
 newtype FieldName
@@ -34,8 +78,8 @@ newtype FieldName
 
 -- | Value validator errors.
 data UserValidationError
-  = InvalidEmail FieldName
-  | BelowMinAge FieldName
+  = InvalidEmail !FieldName
+  | BelowMinAge !FieldName
   deriving (Show)
 
 data Gender = Male | Female deriving (Eq, FromJSON, Generic, Show, ToJSON)
@@ -76,14 +120,14 @@ data User = User
 
 instance FromJSON User where
   parseJSON = withObject "User" $ \v -> do
-      user <- User <$>  v .: "name"
-                   <*>  v .: "age"
-                   <*>  v .: "email"
-                   <*>  v .: "gender"
-                   <*>  v .:? "id"
-      case validate user of
-        Failure e -> fail $ show $ toList e
-        Success u -> pure u
+    user <- User <$>  v .: "name"
+                 <*>  v .: "age"
+                 <*>  v .: "email"
+                 <*>  v .: "gender"
+                 <*>  v .:? "id"
+    case validate user of
+      Failure e -> fail $ show $ toList e
+      Success u -> pure u
 
 validateAge ∷ FieldName → Int → Validation (NonEmpty UserValidationError) Int
 validateAge fieldName age = age <$ failureIf (age < 100) (BelowMinAge fieldName)
@@ -221,3 +265,29 @@ instance Sanitize UserSearch where
     { name = fmap maskShowFirstLast name
     , email = fmap sanitize email
     }
+
+data Role = Admin | NormalUser deriving (Eq, FromJSON, Generic, Show, ToJSON)
+
+data UserClaims (r :: Role) = UserClaims
+  { sub  :: !Text
+  , role :: !Role
+  }
+  deriving (Generic, Show, ToJSON, ToJWT)
+
+instance FromJSON (UserClaims 'Admin) where
+  parseJSON = withObject "Claims" $ \v -> do
+    role <- v .: "role"
+    guard (role == Admin)
+    sub <- v .: "sub"
+    pure $ UserClaims {sub, role}
+
+instance FromJWT (UserClaims 'Admin)
+
+instance FromJSON (UserClaims 'NormalUser) where
+  parseJSON = withObject "Claims" $ \v -> do
+    role <- v .: "role"
+    guard (role == NormalUser)
+    sub <-v .: "sub"
+    pure $ UserClaims {sub, role}
+
+instance FromJWT (UserClaims 'NormalUser)

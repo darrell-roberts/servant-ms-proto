@@ -3,18 +3,25 @@
 module Main where
 
 import Data.Aeson               (Value)
+import Data.ByteString.Lazy     (toStrict)
 import Data.Text                (Text)
 import Network.Connection       (TLSSettings (..))
 import Network.HTTP.Client      (defaultManagerSettings, newManager)
 import Network.HTTP.Client.TLS  (mkManagerSettings)
+import Options.Applicative      (Parser, ParserInfo, ReadM, auto, eitherReader,
+                                 execParser, fullDesc, help, helper, info, long,
+                                 metavar, option, progDesc, short, showDefault,
+                                 strOption, switch, value, (<**>))
 import Servant.API              (NoContent, type (:<|>) ((:<|>)))
+import Servant.Auth.Client      (Token (..))
 import Servant.Client.Streaming (BaseUrl (BaseUrl), ClientM,
                                  Scheme (Http, Https), client, mkClientEnv,
                                  withClientM)
+import System.IO                (hPutStrLn, stderr)
 import UserService.Client       (searchUsers)
-import UserService.Types        (Email (..), UpdateUser (..), User,
-                                 UserSearch (UserSearch))
-
+import UserService.Security     (HashedUser, createJwt, getJWK)
+import UserService.Types        (Email (..), Gender (..), Role (Admin),
+                                 UpdateUser (..), User, UserSearch (UserSearch))
 {-
   https://docs.servant.dev/en/stable/tutorial/Client.html
 
@@ -25,16 +32,57 @@ import UserService.Types        (Email (..), UpdateUser (..), User,
   would be validated at compile time.
 -}
 
-queryUsers ∷ ClientM [User]
-queryUsers =
-  searchUsers $ UserSearch (Just $ Email "droberts@nowhere.com") Nothing Nothing
+data ProgramOpts = ProgramOpts
+  { jwkFile    :: !FilePath
+  , serverHost :: !String
+  , serverPort :: !Int
+  }
+
+parseProgramOpts ∷ Parser ProgramOpts
+parseProgramOpts = ProgramOpts
+  <$> strOption
+      ( long "jwkFile"
+          <> help "JWK File"
+          <> metavar "JWKFILE"
+      )
+  <*> strOption
+      ( long "serverHost"
+          <> help "Server Host"
+          <> metavar "HOSTNAME"
+      )
+  <*> option auto
+      ( long "port"
+          <> short 'p'
+          <> metavar "PORT"
+          <> help "Port number for API server"
+      )
+
+programOpts ∷ ParserInfo ProgramOpts
+programOpts = info (parseProgramOpts <**> helper)
+  (fullDesc <> progDesc "Run Haskell Servant client")
+
+queryUsers ∷ Token → ClientM [HashedUser]
+queryUsers token =
+  searchUsers token $ UserSearch Nothing (Just Male) Nothing
 
 main ∷ IO ()
 main = do
-  manager <- newManager tlsSelfSigned
-  withClientM queryUsers (mkClientEnv manager $ BaseUrl Https "localhost" 8443 "") $ \case
-    Left err    -> putStrLn $ "Error " <> show err
-    Right users -> print users
+  ProgramOpts {jwkFile, serverHost, serverPort} <- execParser programOpts
+
+  jwk <- getJWK jwkFile
+  userJwt <- fmap (Token . toStrict) <$> createJwt jwk Admin
+
+  case userJwt of
+    Left err  -> hPutStrLn stderr ("Failed to create jwt" <> show err)
+    Right token -> do
+      manager <- newManager tlsSelfSigned
+      withClientM
+        (queryUsers token)
+        (mkClientEnv manager $ BaseUrl Https serverHost serverPort "") $
+          \case
+            Left err    -> putStrLn $ "Error: " <> show err
+            Right users -> print users
+
   where
     tlsSelfSigned = mkManagerSettings
       TLSSettingsSimple

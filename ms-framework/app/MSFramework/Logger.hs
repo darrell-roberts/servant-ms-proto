@@ -11,16 +11,19 @@ module MSFramework.Logger
 import Control.Concurrent         (myThreadId)
 import Control.Monad              (when)
 import Control.Monad.IO.Class     (MonadIO (..))
-import Control.Monad.Reader.Class (MonadReader (ask))
+import Control.Monad.Reader.Class (MonadReader (reader))
 import Data.Aeson                 (ToJSON, encode)
 import Data.Text                  (Text)
 import Data.Text.Lazy             (toStrict)
 import Data.Text.Lazy.Encoding    (decodeUtf8)
 import Data.Time                  (getCurrentTime)
 import Data.UUID                  (UUID)
-import MSFramework.Types          (AppContext (..), LogLevel (..),
-                                   LogMessage (..), ProgramOptions (..),
-                                   ReqContext (..), Sanitize (sanitize))
+import MSFramework.Types          (HasLogSettings (..),
+                                   HasRequestContext (requestContext),
+                                   HasServerOptions (serverOptions),
+                                   LogLevel (..), LogMessage (..),
+                                   LogSettings (..), ReqContext (..),
+                                   Sanitize (sanitize), ServerOptions (..))
 import MSFramework.Util           (millisSinceEpoch, showText)
 import System.Log.FastLogger      (LogStr, ToLogStr (toLogStr), pushLogStrLn)
 
@@ -45,13 +48,20 @@ buildLogMessage level appName requestId message = do
     }
 
 logger ∷
-  (MonadReader AppContext m, MonadIO m) ⇒
+  ( HasLogSettings env
+  , HasRequestContext env
+  , HasServerOptions env
+  , MonadReader env m
+  , MonadIO m
+  ) ⇒
   LogLevel →
   Text →
   m ()
 logger level message = do
-  AppContext{logSet, errLogSet, options, reqContext = ReqContext{requestId}} <- ask
-  let ProgramOptions{appName, logLevel} = options
+  ServerOptions{appName, logLevel} <- reader serverOptions
+  ReqContext{requestId} <- reader requestContext
+  LogSettings{logSet, errLogSet} <- reader logSettings
+
   logMessage <- liftIO $ buildLogMessage level appName requestId message
   when (isLevelEnabled level logLevel) $
     liftIO $
@@ -70,8 +80,14 @@ isLevelEnabled requestedLevel enabledLevel =
   levels Error = [Error]
 
 logDebug, logInfo, logWarn, logError ::
-  (MonadReader AppContext m, MonadIO m) ⇒
-  Text → m ()
+  ( HasLogSettings env
+  , HasRequestContext env
+  , HasServerOptions env
+  , MonadReader env m
+  , MonadIO m
+  ) ⇒
+  Text →
+  m ()
 logDebug = logger Debug
 logInfo = logger Info
 logWarn = logger Warn

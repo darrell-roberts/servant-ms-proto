@@ -25,11 +25,12 @@ import MSFramework.Logger         (logDebug)
 import MSFramework.MongoUtil      (SanitizedQuery (..), asMongoKey,
                                    filterBsonId, filterBsonNull, runAction,
                                    sourceQuery)
-import MSFramework.Types          (AppContext (..), Sanitize (sanitize))
+import MSFramework.Types          (HasMongoConnectionPool, HasMongoOptions,
+                                   Sanitize (sanitize))
 import MSFramework.Util           (showText)
 import Prelude                    hiding (id, lookup)
-import UserService.Types          (UpdateUser (..), User (..), UserSearch (..),
-                                   fromBson, toBson)
+import UserService.Types          (UpdateUser (..), User (..), UserMsAppContext,
+                                   UserSearch (..), fromBson, toBson)
 
 -- | Mongodb Collection name.
 usersCollection ∷ Collection
@@ -44,7 +45,7 @@ getUserSearchQuery UserSearch{email, gender, name} =
 
 -- | Lookup all the users in the mongo users collection.
 searchUsers ∷
-  (MonadIO m, MonadReader AppContext m) ⇒
+  (MonadIO m, MonadReader UserMsAppContext m) ⇒
   UserSearch →
   m (Either Failure [User])
 searchUsers userSearch = do
@@ -57,7 +58,7 @@ searchUsers userSearch = do
 
 -- | Lookup a single user by primary key.
 getUser ∷
-  (MonadIO m, MonadReader AppContext m) ⇒
+  (MonadIO m, MonadReader UserMsAppContext m) ⇒
   Text →
   m (Either Failure (Maybe User))
 getUser key =
@@ -68,7 +69,7 @@ getUser key =
 
 -- | Insert a user into the mongo users collection.
 insertUser ∷
-  (MonadIO m, MonadReader AppContext m) ⇒
+  (MonadIO m, MonadReader UserMsAppContext m) ⇒
   User →
   m (Either Failure User)
 insertUser user =
@@ -80,7 +81,7 @@ insertUser user =
 
 -- | Delete a user from the mongo users collection.
 deleteUser ∷
-  (MonadIO m, MonadReader AppContext m) ⇒
+  (MonadIO m, MonadReader UserMsAppContext m) ⇒
   Text →
   m (Either Failure ())
 deleteUser key =
@@ -90,7 +91,7 @@ deleteUser key =
 
 -- | Update a user with optional fields.
 updateUser ∷
-  (MonadIO m, MonadReader AppContext m) ⇒
+  (MonadIO m, MonadReader UserMsAppContext m) ⇒
   UpdateUser →
   m (Either Failure ())
 updateUser u@UpdateUser{id} = do
@@ -106,7 +107,7 @@ updateUser u@UpdateUser{id} = do
 
 -- | Group users by gender and get total counts.
 totalUsers ∷
-  (MonadIO m, MonadReader AppContext m) ⇒
+  (MonadIO m, MonadReader UserMsAppContext m) ⇒
   m (Either Failure [(Text, Int)])
 totalUsers = do
   result <- runAction $ aggregate usersCollection
@@ -120,10 +121,14 @@ totalUsers = do
   where
     getResults ∷ [Document] → [(Text, Int)]
     getResults = mapMaybe $ \doc -> do
-      gender <- "_id" `lookup` doc :: Maybe Text
-      count <- "count" `lookup` doc :: Maybe Int
+      gender <- "_id" `lookup` doc
+      count <- "count" `lookup` doc
       pure (gender, count)
 
 -- | A conduit producer that produces all user documents.
-sourceAllUsers ∷ AppContext → ConduitT () User IO ()
-sourceAllUsers ctx = sourceQuery ctx (select [] usersCollection) .| C.mapM fromBson
+sourceAllUsers ∷
+  (HasMongoConnectionPool env, HasMongoOptions env) ⇒
+  env →
+  ConduitT () User IO ()
+sourceAllUsers ctx = sourceQuery ctx (select [] usersCollection)
+  .| C.mapM fromBson
