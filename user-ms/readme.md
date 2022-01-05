@@ -9,4 +9,5 @@ This project builds a client library and stand alone user microservice.
 |UserService.Handlers|The handler functions for each endpoint|
 |UserService.Persistence|The mongodb persistence functions used by the handler functions|
 |UserService.Types|The data types for the user-ms service|
+|UserService.Security|Hashing and security related type classes|
 |Main|The main module that starts the wai/servant service|

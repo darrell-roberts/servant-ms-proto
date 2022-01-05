@@ -28,6 +28,7 @@ library
                      MSFramework.Util
                      MSFramework.MongoUtil
                      MSFramework.Validator
+                     MSFramework.Arguments
 
     build-depends:    base ^>=4.14.3.0
                       , servant-server
@@ -46,8 +47,10 @@ library
                       , unliftio
                       , validation-selective
                       , resource-pool
-                      , monad-control
                       , conduit
+                      , tls
+                      , optparse-applicative
+                      , network
     hs-source-dirs:   app
     default-language: Haskell2010
     ghc-options: -Wall -Wunused-packages
@@ -59,3 +62,4 @@ library
                         DuplicateRecordFields
                         FlexibleContexts
                         RankNTypes
+                        ScopedTypeVariables

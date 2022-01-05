@@ -1,21 +1,24 @@
-{-# LANGUAGE DeriveAnyClass, DeriveGeneric, DerivingVia, FlexibleInstances #-}
+{-# LANGUAGE DeriveAnyClass, DeriveGeneric, FlexibleInstances #-}
 
 module MSFramework.Types
-  ( AppContext (..)
-  , AppM(..)
-  , LogLevel (..)
-  , LogMessage (..)
-  , ProgramOptions (..)
+  ( LogLevel(..)
+  , LogMessage(..)
+  , LogSettings(..)
+  , ServerOptions(..)
+  , MongoOptions(..)
   , ReqContext (..)
   , Connection (..)
   , ConnectionPool
   , Sanitize
+  , HasServerOptions(..)
+  , HasMongoOptions(..)
+  , HasMongoConnectionPool(..)
+  , HasRequestContext(..)
+  , HasLogSettings(..)
   , maskSensitive
   , sanitize
   ) where
 
-import Control.Monad.Except     (MonadError, MonadIO)
-import Control.Monad.Reader     (MonadReader, ReaderT)
 import Data.Aeson               (FromJSON, ToJSON, encode)
 import Data.Int                 (Int64)
 import Data.Pool                (Pool)
@@ -27,7 +30,6 @@ import Database.MongoDB         (Collection, Database, Field (..), Host,
 import GHC.Generics             (Generic)
 import MSFramework.Util         (maskShowFirstLast)
 import Network.Wai.Handler.Warp (Port)
-import Servant                  (Handler, ServerError)
 import System.Log.FastLogger    (LoggerSet, ToLogStr (toLogStr))
 
 
@@ -41,23 +43,50 @@ data LogLevel = Info | Warn | Error | Debug deriving
     , ToJSON
     )
 
--- | Program options parsed from command line.
-data ProgramOptions = ProgramOptions
-  { serverPort            :: !Port
-  , logLevel              :: !LogLevel
-  , appName               :: !Text
-  , collectionName        :: !Collection
+-- | Server options parsed from command line.
+data ServerOptions = ServerOptions
+  { serverPort :: !Port
+  , logLevel   :: !LogLevel
+  , appName    :: !Text
+  , sslCert    :: !FilePath
+  , sslKey     :: !FilePath
+  , hashPrefix :: !Text
+  , jwk        :: !FilePath
+  }
+  deriving (Show)
+
+-- | Mongo options parsed from command line.
+data MongoOptions = MongoOptions
+  { collectionName        :: !Collection
   , mongoHost             :: !Host
   , mongoUser             :: !Username
   , mongoPass             :: !Password
   , mongoDb               :: !Database
   , mongoTls              :: !Bool
+  , mongoClientCert       :: !FilePath
+  , mongoPrivateKey       :: !FilePath
+  , mongoCaFile           :: !FilePath
   , connectionPoolSize    :: !Int
   , connectionIdleTimeout :: !NominalDiffTime
-  , sslCert               :: !FilePath
-  , sslKey                :: !FilePath
   }
   deriving (Show)
+
+-- Type classes
+
+class HasServerOptions a where
+  serverOptions :: a -> ServerOptions
+
+class HasMongoOptions a where
+  mongoOptions :: a -> MongoOptions
+
+class HasMongoConnectionPool a where
+  mongoPool :: a -> ConnectionPool
+
+class HasRequestContext a where
+  requestContext :: a -> ReqContext
+
+class HasLogSettings a where
+  logSettings :: a -> LogSettings
 
 -- | Environment for each request.
 data ReqContext = ReqContext
@@ -65,32 +94,17 @@ data ReqContext = ReqContext
   , props     :: ![(Text, Text)]
   }
 
+-- | Mongo connection.
 newtype Connection
   = Connection Pipe
+
+-- | Mongo connection pool.
 type ConnectionPool = Pool Connection
 
--- | Application context.
-data AppContext = AppContext
-  { mongoPool  :: !ConnectionPool
-  , options    :: !ProgramOptions
-  , logSet     :: !LoggerSet
-  , errLogSet  :: !LoggerSet
-  , reqContext :: !ReqContext
+data LogSettings = LogSettings
+  { logSet    :: !LoggerSet
+  , errLogSet :: !LoggerSet
   }
-
--- type AppM = ReaderT AppContext Handler
--- | Application monad.
-newtype AppM a
-  = AppM (ReaderT AppContext Handler a)
-  deriving
-    ( Applicative
-    , Functor
-    , Monad
-    , MonadError ServerError
-    , MonadIO
-    , MonadReader AppContext
-    )
-    via ReaderT AppContext Handler
 
 -- | Log message with meta-data tags.
 data LogMessage = LogMessage
@@ -112,9 +126,12 @@ instance ToLogStr LogMessage where
 class Sanitize a where
   sanitize :: a -> a
 
--- | Sanitize `ProgramOptions`.
-instance Sanitize ProgramOptions where
+-- | Sanitize `MongoOptions`.
+instance Sanitize MongoOptions where
   sanitize options = options {mongoUser = "******", mongoPass = "*****"}
+
+instance Sanitize ServerOptions where
+  sanitize = id
 
 -- | Sanitize sensitive mongo fields.
 instance Sanitize [Field] where

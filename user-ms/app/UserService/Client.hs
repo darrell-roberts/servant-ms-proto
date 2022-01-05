@@ -13,8 +13,11 @@ module UserService.Client
 import Data.Aeson               (Value)
 import Data.ByteString          (ByteString)
 import Data.Text                (Text)
-import Servant.API              (NoContent, SourceIO, type (:<|>) ((:<|>)))
-import Servant.Client.Streaming qualified as S
+import Servant.API              (NoContent, SourceIO, type (:<|>) (..))
+import Servant.API.Flatten      (flatten)
+import Servant.Auth.Client      (Token)
+import Servant.Client.Streaming (ClientM, client)
+import UserService.Security     (HashedUser)
 import UserService.Server       (userApi)
 import UserService.Types        (UpdateUser, User, UserSearch)
 
@@ -28,19 +31,19 @@ import UserService.Types        (UpdateUser, User, UserSearch)
   would be validated at compile time.
 -}
 
-searchUsers ∷ UserSearch → S.ClientM [User]
-saveUser ∷ User → S.ClientM User
-getUser ∷ Text → S.ClientM User
-delUser ∷ Text → S.ClientM NoContent
-changeUser ∷ UpdateUser → S.ClientM NoContent
-userCount ∷ S.ClientM [Value]
-downloadUser ∷ S.ClientM (SourceIO ByteString)
+searchUsers ∷ Token → UserSearch → ClientM [HashedUser]
+saveUser ∷ Token → User → ClientM HashedUser
+getUser ∷ Token → Text → ClientM HashedUser
+delUser ∷ Token → Text → ClientM NoContent
+changeUser ∷ Token → UpdateUser → ClientM NoContent
+userCount ∷ Token → ClientM [Value]
+downloadUser ∷ Token → ClientM (SourceIO ByteString)
 
-searchUsers
-  :<|> saveUser
-  :<|> userCount
-  :<|> downloadUser
-  :<|> getUser
-  :<|> delUser
-  :<|> changeUser = S.client userApi
-
+saveUser
+   :<|> userCount
+   :<|> searchUsers
+   :<|> downloadUser
+   :<|> getUser
+   :<|> delUser
+   :<|> changeUser
+   = client $ flatten userApi
