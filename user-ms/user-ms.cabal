@@ -76,6 +76,7 @@ executable user-ms
 
     build-depends:    base ^>=4.14.3.0
                       , servant-server
+                      , servant
                       , aeson
                       , text
                       , wai

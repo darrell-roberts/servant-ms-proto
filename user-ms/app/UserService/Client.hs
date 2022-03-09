@@ -1,26 +1,20 @@
-{-# LANGUAGE DataKinds, ExplicitNamespaces, ScopedTypeVariables #-}
+{-# LANGUAGE DataKinds, ExplicitNamespaces, ScopedTypeVariables,
+             TypeApplications #-}
 
 module UserService.Client
-  ( changeUser
-  , delUser
-  , getUser
-  , saveUser
-  , searchUsers
-  , userCount
-  , downloadUser
-  ) where
+( BaseUserApiRoutes (..),
+  AdminRoutes (..),
+  UserApiRoutes (..),
+  apiClient
+)
+where
 
-import Data.Aeson               (Value)
-import Data.ByteString          (ByteString)
-import Data.Text                (Text)
-import Servant.API              (NoContent, SourceIO, type (:<|>) (..))
-import Servant.API.Flatten      (flatten)
+
+import Servant                  (NamedRoutes, Proxy (Proxy))
 import Servant.Auth.Client      (Token)
-import Servant.Client.Streaming (ClientM, client)
-import UserService.Security     (HashedUser)
-import UserService.Server       (userApi)
-import UserService.Types        (UpdateUser, User, UserSearch)
-
+import Servant.Client.Streaming (AsClientT, ClientM, client)
+import UserService.Server       (AdminRoutes (..), BaseUserApiRoutes (..),
+                                 UserApiRoutes (..))
 {-
   https://docs.servant.dev/en/stable/tutorial/Client.html
 
@@ -31,19 +25,22 @@ import UserService.Types        (UpdateUser, User, UserSearch)
   would be validated at compile time.
 -}
 
-searchUsers ∷ Token → UserSearch → ClientM [HashedUser]
-saveUser ∷ Token → User → ClientM HashedUser
-getUser ∷ Token → Text → ClientM HashedUser
-delUser ∷ Token → Text → ClientM NoContent
-changeUser ∷ Token → UpdateUser → ClientM NoContent
-userCount ∷ Token → ClientM [Value]
-downloadUser ∷ Token → ClientM (SourceIO ByteString)
+-- searchUsers ∷ Token → UserSearch → ClientM [HashedUser]
+-- saveUser ∷ Token → User → ClientM HashedUser
+-- getUser ∷ Token → Text → ClientM HashedUser
+-- delUser ∷ Token → Text → ClientM NoContent
+-- changeUser ∷ Token → UpdateUser → ClientM NoContent
+-- userCount ∷ Token → ClientM [Value]
+-- downloadUser ∷ Token → ClientM (SourceIO ByteString)
 
-saveUser
-   :<|> userCount
-   :<|> searchUsers
-   :<|> downloadUser
-   :<|> getUser
-   :<|> delUser
-   :<|> changeUser
-   = client $ flatten userApi
+-- saveUser
+--    :<|> userCount
+--    :<|> searchUsers
+--    :<|> downloadUser
+--    :<|> getUser
+--    :<|> delUser
+--    :<|> changeUser
+--    = client $ flatten userApi
+
+apiClient ∷ BaseUserApiRoutes (AsClientT ClientM)
+apiClient = client (Proxy @(NamedRoutes BaseUserApiRoutes))

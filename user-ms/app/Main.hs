@@ -3,8 +3,10 @@ module Main (main) where
 import Control.Exception           (Exception (displayException), IOException,
                                     catch)
 import Control.Monad               (void, when)
+import Data.Aeson                  (encode)
 import Data.Default.Class          (def)
 import Data.Maybe                  (fromMaybe, isNothing)
+import Data.Text                   (pack)
 import Data.Text.Lazy              (toStrict)
 import Data.Text.Lazy.Encoding     (decodeUtf8)
 import Data.X509.CertificateStore  (readCertificateStore)
@@ -36,9 +38,6 @@ import Network.Wai.Handler.WarpTLS (runTLS, tlsSettings)
 import Network.Wai.Middleware.Gzip (gzip)
 import Options.Applicative         (Parser, ParserInfo, execParser, fullDesc,
                                     helper, info, progDesc, (<**>))
-
-import Data.Aeson                  (encode)
-import Data.Text                   (pack)
 import System.Exit                 (exitFailure)
 import System.Log.FastLogger       (defaultBufSize, newStderrLoggerSet,
                                     newStdoutLoggerSet)
@@ -81,11 +80,6 @@ warpSettings ctx = setPort (port ctx) $
 -- | Start a Wai / servant application with middleware.
 startServer ∷ UserMsAppContext → IO ()
 startServer ctx = do
-  logInfo ctx Nothing $ "Running with options: "
-    <> showText (sanitize $ serverOptions ctx)
-    <> " "
-    <> showText (sanitize $ mongoOptions ctx)
-
   logInfo ctx Nothing $ "Server starting on port "
     <> showText (serverPort $ serverOptions ctx)
 
@@ -145,13 +139,18 @@ main ∷ IO ()
 main = do
   o@UserAppOptions{_serverOptions, _mongoOptions} <- execParser programOpts
 
-  clientParams <- Just <$> getTLSClientParams _mongoOptions
+  clientParams <- getTLSClientParams _mongoOptions
   pool <- createMongoDBPool clientParams _mongoOptions
 
   logSettings <- LogSettings <$> newStdoutLoggerSet defaultBufSize
                              <*> newStderrLoggerSet defaultBufSize
 
   let env = UserMsAppContext pool o logSettings (ReqContext Nothing [])
+
+  logInfo env Nothing $ "Running with options: "
+    <> showText (sanitize $ serverOptions env)
+    <> " "
+    <> showText (sanitize $ mongoOptions env)
 
   -- Make sure we can connect to database (mongodb)
   checkConnection env `catch` \e -> do

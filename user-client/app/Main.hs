@@ -16,9 +16,10 @@ import Servant.API              (NoContent, type (:<|>) ((:<|>)))
 import Servant.Auth.Client      (Token (..))
 import Servant.Client.Streaming (BaseUrl (BaseUrl), ClientM,
                                  Scheme (Http, Https), client, mkClientEnv,
-                                 withClientM)
+                                 withClientM, (//), (/:))
 import System.IO                (hPutStrLn, stderr)
-import UserService.Client       (searchUsers)
+import UserService.Client       (AdminRoutes (..), BaseUserApiRoutes (..),
+                                 UserApiRoutes (..), apiClient)
 import UserService.Security     (HashedUser, createJwt, getJWK)
 import UserService.Types        (Email (..), Gender (..), Role (Admin),
                                  UpdateUser (..), User, UserSearch (UserSearch))
@@ -63,7 +64,11 @@ programOpts = info (parseProgramOpts <**> helper)
 
 queryUsers ∷ Token → ClientM [HashedUser]
 queryUsers token =
-  searchUsers token $ UserSearch Nothing (Just Male) Nothing
+  apiClient //
+  baseUrl //
+  adminRoutes /: token //
+  searchUsersRoute /:
+  UserSearch Nothing (Just Male) Nothing
 
 main ∷ IO ()
 main = do
