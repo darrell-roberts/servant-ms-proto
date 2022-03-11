@@ -2,8 +2,12 @@
 
 module Main where
 
+import Control.Exception        (Exception (displayException))
+import Crypto.JWT               (JWK)
 import Data.Aeson               (Value)
+import Data.Aeson.Encode.Pretty (encodePretty)
 import Data.ByteString.Lazy     (toStrict)
+import Data.ByteString.Lazy     qualified as B
 import Data.Text                (Text)
 import Network.Connection       (TLSSettings (..))
 import Network.HTTP.Client      (defaultManagerSettings, newManager)
@@ -14,14 +18,17 @@ import Options.Applicative      (Parser, ParserInfo, ReadM, auto, eitherReader,
                                  strOption, switch, value, (<**>))
 import Servant.API              (NoContent, type (:<|>) ((:<|>)))
 import Servant.Auth.Client      (Token (..))
-import Servant.Client.Streaming (BaseUrl (BaseUrl), ClientM,
+import Servant.Client.Streaming (AsClientT, BaseUrl (BaseUrl), ClientM,
                                  Scheme (Http, Https), client, mkClientEnv,
-                                 withClientM)
+                                 withClientM, (//), (/:))
 import System.IO                (hPutStrLn, stderr)
-import UserService.Client       (searchUsers)
+import UserService.Client       (AdminRoutes (..), BaseUserApiRoutes (..),
+                                 UserApiRoutes (..), UserRoutes (..), adminApi,
+                                 userApi, userClient)
 import UserService.Security     (HashedUser, createJwt, getJWK)
-import UserService.Types        (Email (..), Gender (..), Role (Admin),
-                                 UpdateUser (..), User, UserSearch (UserSearch))
+import UserService.Types        (Email (..), Gender (..),
+                                 Role (Admin, NormalUser), UpdateUser (..),
+                                 User, UserSearch (UserSearch))
 {-
   https://docs.servant.dev/en/stable/tutorial/Client.html
 
@@ -62,26 +69,44 @@ programOpts = info (parseProgramOpts <**> helper)
   (fullDesc <> progDesc "Run Haskell Servant client")
 
 queryUsers ∷ Token → ClientM [HashedUser]
-queryUsers token =
-  searchUsers token $ UserSearch Nothing (Just Male) Nothing
+queryUsers token = adminApi token //
+  searchUsersRoute /:
+  UserSearch Nothing (Just Male) Nothing
+
+countUsers ∷ Token → ClientM [Value]
+countUsers token = userApi token // userCountRoute
+
+createJwtToken ∷ JWK → Text → Role → IO Token
+createJwtToken jwk subject role = do
+  jwt <- fmap (Token . toStrict) <$> createJwt jwk subject role
+  either (fail . show) pure jwt
 
 main ∷ IO ()
 main = do
   ProgramOpts {jwkFile, serverHost, serverPort} <- execParser programOpts
 
   jwk <- getJWK jwkFile
-  userJwt <- fmap (Token . toStrict) <$> createJwt jwk Admin
 
-  case userJwt of
-    Left err  -> hPutStrLn stderr ("Failed to create jwt" <> show err)
-    Right token -> do
-      manager <- newManager tlsSelfSigned
-      withClientM
-        (queryUsers token)
-        (mkClientEnv manager $ BaseUrl Https serverHost serverPort "") $
-          \case
-            Left err    -> putStrLn $ "Error: " <> show err
-            Right users -> print users
+  userJwt <- createJwtToken jwk "droberts" NormalUser
+  adminJwt <- createJwtToken jwk "dradmin" Admin
+
+  manager <- newManager tlsSelfSigned
+
+  withClientM
+    (do
+      users <- queryUsers adminJwt
+      counts <- countUsers userJwt
+      pure (users, counts)
+    )
+    (mkClientEnv manager $ BaseUrl Https serverHost serverPort "") $
+      \case
+        Left err -> putStrLn $ "Error: " <> show err
+        Right (users, counts) -> do
+          putStrLn "users:"
+          B.putStr $ encodePretty users
+          putStrLn "\ncounts:"
+          B.putStr $ encodePretty counts
+          putStrLn ""
 
   where
     tlsSelfSigned = mkManagerSettings

@@ -40,6 +40,8 @@ executable user-client
                       , connection
                       , optparse-applicative
                       , bytestring
+                      , jose
+                      , aeson-pretty
     hs-source-dirs:   app
     default-language: Haskell2010
     default-extensions: ImportQualifiedPost

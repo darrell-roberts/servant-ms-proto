@@ -25,7 +25,7 @@ import GHC.Generics         (Generic)
 import MSFramework.Util     (showText)
 import Prelude              hiding (id)
 import Servant.Auth.Server  (defaultJWTSettings, makeJWT)
-import UserService.Types    (Email (..), Role (..), User (..), UserClaims (..))
+import UserService.Types    (Email (..), Role (..), User (..), UserAuth (..))
 
 getJWK ∷ FilePath → IO JWK
 getJWK fp =
@@ -35,15 +35,15 @@ getJWK fp =
       Nothing  -> fail "failed to read JWK"
       . decode'
 
-createJwt ∷ JWK → Role → IO (Either Error ByteString)
-createJwt jwk role = do
+createJwt ∷ JWK → Text → Role → IO (Either Error ByteString)
+createJwt jwk subject role = do
   expires <- addUTCTime (secondsToNominalDiffTime 60 * 5) <$> getCurrentTime
   makeJWT user (defaultJWTSettings jwk) (Just expires)
 
   where
     user = case role of
-      Admin      -> UserClaims "admin" role
-      NormalUser -> UserClaims "user" role
+      Admin      -> UserAuth subject role "proto-corp"
+      NormalUser -> UserAuth subject role "proto-corp"
 
 -- | A type class constraint that can be hashed.
 class Hashable a where

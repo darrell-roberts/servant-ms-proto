@@ -11,7 +11,7 @@ module UserService.Types (
   , UserSearch (..)
   , UserMsAppContext (..)
   , UserAppOptions (..)
-  , UserClaims (..)
+  , UserAuth (..)
   , Role (..)
   , fromBson
   , toBson
@@ -19,13 +19,20 @@ module UserService.Types (
 
 import Control.Monad         (guard)
 import Control.Monad.Reader  (ReaderT)
+import Crypto.JWT            (ClaimsSet, addClaim, claimIss, claimSub,
+                              emptyClaimsSet, string, stringOrUri,
+                              unregisteredClaims)
 import Data.Aeson            (FromJSON (..), ToJSON (..), object, withObject,
                               (.:), (.:?), (.=))
+import Data.Aeson            qualified as J
 import Data.Bson             (Document, ObjectId, Val, Value (..), cast',
                               lookup, val, (=:))
 import Data.List.NonEmpty    (NonEmpty, toList)
+import Data.Map              qualified as Map
+import Data.Maybe            (fromMaybe)
 import Data.Text             (Text)
 import GHC.Generics          (Generic)
+import Lens.Micro            ((&), (?~), (^.), (^?))
 import MSFramework.Types     (ConnectionPool, HasLogSettings (..),
                               HasMongoConnectionPool (..), HasMongoOptions (..),
                               HasRequestContext (..), HasServerOptions (..),
@@ -35,7 +42,7 @@ import MSFramework.Util      (maskShowFirstLast, showText)
 import MSFramework.Validator (Validator (..))
 import Prelude               hiding (id, lookup)
 import Servant               (Handler)
-import Servant.Auth.Server   (FromJWT, ToJWT)
+import Servant.Auth.Server   (FromJWT (..), ToJWT (..))
 import Text.Read             (readMaybe)
 import Text.Regex.TDFA       ((=~))
 import Validation            (Validation (..), failureIf, failureUnless)
@@ -268,26 +275,52 @@ instance Sanitize UserSearch where
 
 data Role = Admin | NormalUser deriving (Eq, FromJSON, Generic, Show, ToJSON)
 
-data UserClaims (r :: Role) = UserClaims
-  { sub  :: !Text
-  , role :: !Role
+data UserAuth (r :: Role) = UserAuth
+  { id     :: !Text
+  , role   :: !Role
+  , issuer :: !Text
   }
-  deriving (Generic, Show, ToJSON, ToJWT)
+  deriving (FromJSON, Generic, Show, ToJSON)
 
-instance FromJSON (UserClaims 'Admin) where
-  parseJSON = withObject "Claims" $ \v -> do
-    role <- v .: "role"
-    guard (role == Admin)
-    sub <- v .: "sub"
-    pure $ UserClaims {sub, role}
+instance ToJWT (UserAuth r) where
+  encodeJWT UserAuth {id, role} =
+    emptyClaimsSet
+    & claimSub ?~ sub
+    & claimIss ?~ "proto-corp"
+    & addClaim "role" (asVal role)
+    where
+      sub = fromMaybe "" $ id ^? stringOrUri
+      asVal = J.String . showText
 
-instance FromJWT (UserClaims 'Admin)
+decodeClaims ∷ ClaimsSet → Maybe (UserAuth r)
+decodeClaims claimsSet = do
+  sub <- claimsSet ^. claimSub
+  iss <- claimsSet ^. claimIss
+  unRegClaims <- claimsSet ^? unregisteredClaims
+  roleClaim <- "role" `Map.lookup` unRegClaims >>= parseRole
+  pure $ UserAuth
+    { id = sub ^. string
+    , role = roleClaim
+    , issuer = iss ^. string
+    }
+  where
+    parseRole role = case role of
+      J.String "Admin"      -> Just Admin
+      J.String "NormalUser" -> Just NormalUser
+      _                     -> Nothing
 
-instance FromJSON (UserClaims 'NormalUser) where
-  parseJSON = withObject "Claims" $ \v -> do
-    role <- v .: "role"
-    guard (role == NormalUser)
-    sub <-v .: "sub"
-    pure $ UserClaims {sub, role}
+instance FromJWT (UserAuth 'Admin) where
+  decodeJWT claimsSet = maybe (Left "Invalid JWT") Right parseClaims
+    where
+      parseClaims = do
+        user <- decodeClaims claimsSet
+        guard (role user == Admin)
+        pure user
 
-instance FromJWT (UserClaims 'NormalUser)
+instance FromJWT (UserAuth 'NormalUser) where
+  decodeJWT claimsSet = maybe (Left "Invalid JWT") Right parseClaims
+    where
+      parseClaims = do
+        user <- decodeClaims claimsSet
+        guard (role user == NormalUser)
+        pure user

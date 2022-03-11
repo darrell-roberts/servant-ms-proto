@@ -1,3 +1,5 @@
+{-# LANGUAGE DataKinds #-}
+
 module UserService.Handlers
   ( delUser
   , getUser
@@ -30,7 +32,8 @@ import Servant.Conduit            (ConduitToSourceIO (conduitToSourceIO))
 import UnliftIO                   (Exception (displayException))
 import UserService.Persistence    qualified as P
 import UserService.Security       (Hashable, Hashed, hash)
-import UserService.Types          (AppM, UpdateUser, User, UserSearch)
+import UserService.Types          (AppM, Role (..), UpdateUser, User,
+                                   UserAuth (..), UserSearch)
 
 -- | Run a Hashable handler
 withHashable ∷ Hashable a ⇒ AppM a → AppM (Hashed a)
@@ -38,10 +41,9 @@ withHashable handler =
   reader (hashPrefix . serverOptions) >>= \prefix -> hash prefix <$> handler
 
 -- | Handler for the searchUsers endpoint.
--- searchUsers ∷ UserClaims 'Admin → UserSearch → AppM [User]
-searchUsers ∷ UserSearch → AppM [User]
-searchUsers userSearch = do
-  -- logDebug $ "jwt " <> showText jwt
+searchUsers ∷ UserAuth 'Admin → UserSearch → AppM [User]
+searchUsers userAuth userSearch = do
+  logDebug $ "userAuth " <> showText userAuth
   logDebug $ "getting users with query: " <> showText (sanitize userSearch)
   P.searchUsers userSearch >>= \case
     Left e -> do
@@ -50,7 +52,6 @@ searchUsers userSearch = do
     Right r -> pure $ bool r mempty (null r)
 
 -- | Handler for the SaveUser endoint.
--- saveUser ∷ UserClaims 'NormalUser → User → AppM User
 saveUser ∷ User → AppM User
 saveUser user = do
   logDebug $ "Request to store user: " <> toJsonSanitized user
@@ -61,7 +62,6 @@ saveUser user = do
     Right u -> pure u
 
 -- | Handler for the GetUser endpoint.
--- getUser ∷ UserClaims 'Admin → Text → AppM User
 getUser ∷ Text → AppM User
 getUser key = do
   logDebug $ "Getting user with id " <> key
@@ -74,7 +74,6 @@ getUser key = do
       Nothing   -> throwError err404
 
 -- | Handler for the DelUser endpoint.
--- delUser ∷ UserClaims 'Admin → Text → AppM NoContent
 delUser ∷ Text → AppM NoContent
 delUser key = P.deleteUser key >>= \case
   Left e -> do
@@ -83,7 +82,6 @@ delUser key = P.deleteUser key >>= \case
   Right _ -> pure NoContent
 
 -- | Handler for the ChangeUser endpoint.
--- updateUser ∷ UserClaims 'Admin → UpdateUser → AppM NoContent
 updateUser ∷ UpdateUser → AppM NoContent
 updateUser user =
   P.updateUser user >>= \case
@@ -93,9 +91,9 @@ updateUser user =
     Right _ -> pure NoContent
 
 -- | Handler for the UserCount endpoint.
--- totalUsers ∷ UserClaims 'Admin → AppM [Value]
-totalUsers ∷ AppM [Value]
-totalUsers =
+totalUsers ∷ UserAuth 'NormalUser → AppM [Value]
+totalUsers userAuth = do
+  logDebug $ "userAuth: " <> showText userAuth
   P.totalUsers >>= \case
     Left e -> do
       logError $ "Failed to get total user counts: " <> pack (displayException e)
@@ -106,7 +104,6 @@ totalUsers =
     toObject (t, i) = object [fromText t .= i]
 
 -- | Streaming handler using conduit.
--- downloadUsers ∷ UserClaims 'Admin → AppM (SourceIO ByteString)
 downloadUsers ∷ AppM (SourceIO ByteString)
 downloadUsers = conduitToSourceIO . stream <$> ask
   where

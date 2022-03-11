@@ -21,7 +21,6 @@ import Data.Aeson                     (object, (.=))
 import Data.Aeson                     qualified as A
 import Data.Aeson.Key                 (fromText)
 import Data.Aeson.Types               (Pair)
-import Data.Bool                      (bool)
 import Data.Pool                      (createPool, destroyAllResources,
                                        withResource)
 import Data.Text                      (Text, unpack)
@@ -30,7 +29,7 @@ import Database.MongoDB               (Action, Document, Failure,
                                        ObjectId, Query (Query, selection),
                                        Select, Selection (..), Value (..),
                                        access, allCollections, auth, close,
-                                       closeCursor, connect, find, master, next)
+                                       closeCursor, find, master, next)
 import Database.MongoDB.Transport.Tls qualified as MTLS
 import GHC.Conc                       (getNumProcessors)
 import MSFramework.Types              (Connection (..), ConnectionPool,
@@ -93,11 +92,11 @@ createMongoDBPool ∷ ClientParams → MongoOptions → IO ConnectionPool
 createMongoDBPool cparams mopts = do
   cores <- getNumProcessors
   hFlush stdout
-  let host@(Host hostname port) = mongoHost mopts
-      MongoOptions{mongoUser, mongoPass, mongoDb, mongoTls} = mopts
+  let (Host hostname port) = mongoHost mopts
+      MongoOptions{mongoUser, mongoPass, mongoDb} = mopts
   createPool
     (do
-       con <- bool (connect host) (MTLS.connectWithTlsParams cparams hostname port) mongoTls
+       con <- MTLS.connectWithTlsParams cparams hostname port
        authOk <- access con master mongoDb $ auth mongoUser mongoPass
        unless authOk $
         throwIO $ InvalidCredentials $

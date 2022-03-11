@@ -3,8 +3,10 @@ module Main (main) where
 import Control.Exception           (Exception (displayException), IOException,
                                     catch)
 import Control.Monad               (void, when)
+import Data.Aeson                  (encode)
 import Data.Default.Class          (def)
 import Data.Maybe                  (fromMaybe, isNothing)
+import Data.Text                   (pack)
 import Data.Text.Lazy              (toStrict)
 import Data.Text.Lazy.Encoding     (decodeUtf8)
 import Data.X509.CertificateStore  (readCertificateStore)
@@ -17,7 +19,7 @@ import MSFramework.Middleware      (exceptionLogger, exceptionResponder,
 import MSFramework.MongoUtil       (checkConnection, closeMongoDBPool,
                                     createMongoDBPool)
 import MSFramework.Types           (HasMongoOptions (..), HasServerOptions (..),
-                                    LogSettings (LogSettings),
+                                    LogSettings (LogSettings, logSet),
                                     MongoOptions (..), ReqContext (..),
                                     Sanitize (sanitize), ServerOptions (..))
 import MSFramework.Util            (showText)
@@ -36,12 +38,9 @@ import Network.Wai.Handler.WarpTLS (runTLS, tlsSettings)
 import Network.Wai.Middleware.Gzip (gzip)
 import Options.Applicative         (Parser, ParserInfo, execParser, fullDesc,
                                     helper, info, progDesc, (<**>))
-
-import Data.Aeson                  (encode)
-import Data.Text                   (pack)
 import System.Exit                 (exitFailure)
-import System.Log.FastLogger       (defaultBufSize, newStderrLoggerSet,
-                                    newStdoutLoggerSet)
+import System.Log.FastLogger       (defaultBufSize, flushLogStr,
+                                    newStderrLoggerSet, newStdoutLoggerSet)
 import System.Posix.Signals        (Handler (CatchOnce), addSignal,
                                     emptySignalSet, installHandler, sigINT,
                                     sigTERM)
@@ -81,16 +80,11 @@ warpSettings ctx = setPort (port ctx) $
 -- | Start a Wai / servant application with middleware.
 startServer ∷ UserMsAppContext → IO ()
 startServer ctx = do
-  logInfo ctx Nothing $ "Running with options: "
-    <> showText (sanitize $ serverOptions ctx)
-    <> " "
-    <> showText (sanitize $ mongoOptions ctx)
-
   logInfo ctx Nothing $ "Server starting on port "
     <> showText (serverPort $ serverOptions ctx)
 
   key <- getJWK (jwk . _serverOptions . options $ ctx)
-  jwts <- sequence <$> sequence [createJwt key Admin, createJwt key NormalUser]
+  jwts <- sequence <$> sequence [createJwt key "user" Admin, createJwt key "admin" NormalUser]
 
   case jwts of
     Left e -> logError ctx Nothing $ showText e
@@ -153,10 +147,17 @@ main = do
 
   let env = UserMsAppContext pool o logSettings (ReqContext Nothing [])
 
+  logInfo env Nothing $ "Running with options: "
+    <> showText (sanitize $ serverOptions env)
+    <> " "
+    <> showText (sanitize $ mongoOptions env)
+
   -- Make sure we can connect to database (mongodb)
   checkConnection env `catch` \e -> do
     logError env Nothing $ "Failed to connect to mongodb: " <>
       pack (displayException (e :: IOException))
+    logInfo env Nothing "Exiting"
+    flushLogStr $ (logSet ._logSettings) env
     exitFailure
 
   startServer env
